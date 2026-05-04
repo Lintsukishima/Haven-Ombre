@@ -3,6 +3,20 @@ create extension if not exists pgcrypto;
 alter table public.memories
 add column if not exists updated_at timestamptz default now();
 
+alter table public.memories
+add column if not exists resolved boolean default false;
+
+alter table public.memories
+add column if not exists digested boolean default false;
+
+update public.memories
+set resolved = false
+where resolved is null;
+
+update public.memories
+set digested = false
+where digested is null;
+
 create or replace function public.set_memories_updated_at()
 returns trigger
 language plpgsql
@@ -20,6 +34,11 @@ before update on public.memories
 for each row
 execute function public.set_memories_updated_at();
 
+drop function if exists public.create_memory(
+  text, text, text, text[], text[], text, double precision,
+  double precision, double precision, boolean, timestamptz
+);
+
 create or replace function public.create_memory(
   p_id text default null,
   p_title text default '未命名记忆',
@@ -31,6 +50,8 @@ create or replace function public.create_memory(
   p_arousal double precision default 0.5,
   p_importance double precision default 5.0,
   p_pinned boolean default false,
+  p_resolved boolean default false,
+  p_digested boolean default false,
   p_time timestamptz default now()
 )
 returns public.memories
@@ -52,6 +73,7 @@ begin
   insert into public.memories (
     id, title, type, domain, tags, content,
     valence, arousal, importance, pinned,
+    resolved, digested,
     activation_count, created, last_active, updated_at, source, synced_at
   )
   values (
@@ -60,6 +82,7 @@ begin
     greatest(0.0, least(1.0, p_arousal)),
     greatest(1.0, least(10.0, p_importance)),
     p_pinned,
+    p_resolved, p_digested,
     1, p_time, p_time, p_time, 'chatgpt', p_time
   )
   on conflict (id) do update set
@@ -72,6 +95,8 @@ begin
     arousal = excluded.arousal,
     importance = excluded.importance,
     pinned = excluded.pinned,
+    resolved = excluded.resolved,
+    digested = excluded.digested,
     last_active = excluded.last_active,
     updated_at = now(),
     source = 'chatgpt',
@@ -84,10 +109,10 @@ $$;
 
 revoke all on function public.create_memory(
   text, text, text, text[], text[], text, double precision,
-  double precision, double precision, boolean, timestamptz
+  double precision, double precision, boolean, boolean, boolean, timestamptz
 ) from public;
 
 grant execute on function public.create_memory(
   text, text, text, text[], text[], text, double precision,
-  double precision, double precision, boolean, timestamptz
+  double precision, double precision, boolean, boolean, boolean, timestamptz
 ) to authenticated, service_role;

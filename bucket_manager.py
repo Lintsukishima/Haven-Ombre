@@ -115,6 +115,8 @@ class BucketManager:
         created: str = None,
         last_active: str = None,
         updated_at: str = None,
+        resolved: bool = False,
+        digested: bool = False,
     ) -> str:
         """
         Create a new memory bucket, return bucket ID.
@@ -157,6 +159,10 @@ class BucketManager:
             metadata["pinned"] = True
         if protected:
             metadata["protected"] = True
+        if resolved:
+            metadata["resolved"] = True
+        if digested:
+            metadata["digested"] = True
         if source:
             metadata["source"] = source
 

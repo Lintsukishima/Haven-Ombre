@@ -1088,6 +1088,8 @@ async def api_create_memory(request):
     arousal = _float_between(body.get("arousal"), 0.5)
     pinned = _bool_value(body.get("pinned"), False)
     protected = _bool_value(body.get("protected"), False)
+    resolved = _bool_value(body.get("resolved"), False)
+    digested = _bool_value(body.get("digested"), False)
 
     existing = await bucket_mgr.get(bucket_id) if bucket_id else None
     if existing:
@@ -1100,7 +1102,9 @@ async def api_create_memory(request):
             valence=valence,
             arousal=arousal,
             name=title,
+            resolved=resolved,
             pinned=pinned,
+            digested=digested,
             source="chatgpt",
             last_active=str(body.get("last_active") or now),
             updated_at=str(body.get("updated_at") or now),
@@ -1120,6 +1124,8 @@ async def api_create_memory(request):
             name=title,
             pinned=pinned,
             protected=protected,
+            resolved=resolved,
+            digested=digested,
             bucket_id=bucket_id,
             source="chatgpt",
             created=str(body.get("created") or now),

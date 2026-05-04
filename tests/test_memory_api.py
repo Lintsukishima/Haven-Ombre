@@ -43,6 +43,8 @@ async def test_create_memory_api_writes_chatgpt_source(monkeypatch, bucket_mgr):
             "content": "C 端通过 create_memory 写入。",
             "domain": ["同步"],
             "tags": ["chatgpt"],
+            "resolved": True,
+            "digested": True,
         },
         headers={"authorization": "Bearer secret"},
     )
@@ -55,5 +57,7 @@ async def test_create_memory_api_writes_chatgpt_source(monkeypatch, bucket_mgr):
     assert payload["status"] == "created"
     assert payload["source"] == "chatgpt"
     assert bucket["metadata"]["source"] == "chatgpt"
+    assert bucket["metadata"]["resolved"] is True
+    assert bucket["metadata"]["digested"] is True
     assert bucket["metadata"]["created"].endswith("+00:00")
     assert bucket["metadata"]["updated_at"].endswith("+00:00")

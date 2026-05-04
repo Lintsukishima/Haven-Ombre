@@ -72,6 +72,14 @@ def ensure_list(value: Any) -> list[Any]:
     return [value]
 
 
+def ensure_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def public_record(record: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in record.items() if not key.startswith("_")}
 
@@ -117,7 +125,9 @@ def parse_md(path: Path) -> dict[str, Any] | None:
         "valence": float(meta.get("valence", 0.5)),
         "arousal": float(meta.get("arousal", 0.5)),
         "importance": float(meta.get("importance", 1.0)),
-        "pinned": bool(meta.get("pinned", False)),
+        "pinned": ensure_bool(meta.get("pinned", False)),
+        "resolved": ensure_bool(meta.get("resolved", False)),
+        "digested": ensure_bool(meta.get("digested", False)),
         "activation_count": int(float(meta.get("activation_count", 0))),
         "created": str(created),
         "last_active": str(last_active),
@@ -138,7 +148,9 @@ def record_to_md(record: dict[str, Any], path: Path) -> None:
         "valence": float(record.get("valence", 0.5)),
         "arousal": float(record.get("arousal", 0.5)),
         "importance": float(record.get("importance", 1.0)),
-        "pinned": bool(record.get("pinned", False)),
+        "pinned": ensure_bool(record.get("pinned", False)),
+        "resolved": ensure_bool(record.get("resolved", False)),
+        "digested": ensure_bool(record.get("digested", False)),
         "activation_count": int(float(record.get("activation_count", 0))),
         "created": str(record.get("created") or format_time(now_utc())),
         "last_active": str(record.get("last_active") or record.get("created") or format_time(now_utc())),
