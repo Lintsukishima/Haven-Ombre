@@ -72,6 +72,7 @@ from import_memory import ImportEngine
 from memory_diffusion import (
     diffuse_memory,
     diffusion_options_from_config,
+    format_diffusion_path,
     format_diffusion_trace,
     path_has_caution,
     seed_scores_for_buckets,
@@ -1106,8 +1107,13 @@ def _compact_diffused_summary(bucket: dict, dehydrated: str, max_chars: int = 18
 
     meta = bucket.get("metadata", {}) or {}
     title = str(meta.get("name") or bucket.get("id") or "记忆").strip()
-    context = _bucket_context_snippet(bucket, max_chars)
-    return _clip_text(f"{title}: {context}" if context else title, max_chars)
+    return _clip_text(title, max_chars)
+
+
+def _bucket_diffusion_path_summary(path, bucket_map: dict[str, dict], max_chars: int = 180) -> str:
+    if not path:
+        return ""
+    return _clip_text(format_diffusion_path(path, bucket_map), max_chars)
 
 
 def _breath_one_hop_diffusion_options(top_k: int):
@@ -1459,12 +1465,14 @@ async def _build_mcp_diffused_memory_block(
                 clean_meta,
             )
             summary = _compact_diffused_summary(target, raw_summary)
+            path_summary = _bucket_diffusion_path_summary(hit.best_path, bucket_map)
             caution = (
                 "路径含冲突/阻断，仅作边界背景。"
                 if path_has_caution(hit.best_path)
                 else "背景联想，不代表当前事实。"
             )
-            block = f"- [bucket_id:{target_id}] {summary}（{caution}）"
+            path_part = f"路径: {path_summary}；" if path_summary else ""
+            block = f"- [bucket_id:{target_id}] {path_part}摘要: {summary}（{caution}）"
             block_tokens = count_tokens_approx(block)
             if block_tokens > remaining:
                 break
@@ -1677,19 +1685,81 @@ def _format_direct_moment(seed: dict, grouped: dict[str, list[dict]], token_budg
     return compact if count_tokens_approx(compact) <= token_budget else ""
 
 
-def _format_related_moment(moment: dict, caution: bool = False) -> str:
+def _format_related_moment(
+    moment: dict,
+    caution: bool = False,
+    path=None,
+    moment_map: dict[str, dict] | None = None,
+) -> str:
     note = "路径含冲突/阻断，仅作边界背景。" if caution else "背景联想，不代表当前事实。"
+    summary = _diffused_moment_summary(moment, path=path, moment_map=moment_map or {})
+    path_part = ""
+    if path is not None:
+        path_summary = _moment_path_summary(path, moment_map or {})
+        if path_summary:
+            path_part = f"路径: {path_summary}；"
     return (
         f"- [bucket_id:{moment['bucket_id']}] [moment_id:{moment['moment_id']}] "
-        f"{_moment_label(moment)}: {_moment_text(moment, 220)}（{note}）"
+        f"{path_part}摘要: {summary}（{note}）"
     )
 
 
 def _format_secondary_direct_moment(moment: dict) -> str:
+    summary = _diffused_moment_summary(moment)
     return (
         f"- [bucket_id:{moment['bucket_id']}] [moment_id:{moment['moment_id']}] "
-        f"{_moment_label(moment)}: {_moment_text(moment, 220)}（相关命中，来自同一查询语义。）"
+        f"摘要: {summary}（相关命中，来自同一查询语义。）"
     )
+
+
+def _diffused_moment_summary(
+    moment: dict,
+    *,
+    path=None,
+    moment_map: dict[str, dict] | None = None,
+    max_chars: int = 180,
+) -> str:
+    label = _moment_label(moment)
+    title = _moment_bucket_title(moment) or str(moment.get("bucket_id") or "记忆")
+    status = _moment_status_label(moment)
+    parts = [f"{title} / {label}"]
+    if status:
+        parts.append(status)
+    path_summary = _moment_path_summary(path, moment_map or {}) if path is not None else ""
+    if path_summary:
+        parts.append(f"路径 {path_summary}")
+    return _clip_text("；".join(parts), max_chars)
+
+
+def _moment_status_label(moment: dict) -> str:
+    meta = moment.get("metadata", {}) if isinstance(moment.get("metadata"), dict) else {}
+    if meta.get("resolved") or meta.get("bucket_resolved"):
+        return "已解决"
+    if meta.get("digested") or meta.get("bucket_digested"):
+        return "已消化"
+    if str(meta.get("type") or meta.get("bucket_type") or "").lower() == "archived":
+        return "归档"
+    return ""
+
+
+def _moment_path_summary(path, moment_map: dict[str, dict], max_chars: int = 140) -> str:
+    if path is None:
+        return ""
+    nodes = tuple(str(node_id) for node_id in (getattr(path, "nodes", ()) or ()))
+    if not nodes:
+        return ""
+    labels = [_moment_node_label(moment_map.get(nodes[0]), nodes[0])]
+    for step in getattr(path, "steps", ()) or ():
+        target_id = str(getattr(step, "target", "") or "")
+        arrow = "<-" if getattr(step, "direction", "") == "incoming" else "->"
+        labels.append(f"{arrow} {_moment_node_label(moment_map.get(target_id), target_id)}")
+    return _clip_text(" ".join(labels), max_chars)
+
+
+def _moment_node_label(moment: dict | None, fallback_id: str) -> str:
+    if isinstance(moment, dict):
+        return _clip_text(_moment_bucket_title(moment) or str(moment.get("bucket_id") or fallback_id), 48)
+    return _clip_text(fallback_id, 48)
 
 
 def _recall_relevance_options():
@@ -2116,7 +2186,12 @@ async def _build_mcp_moment_diffused_memory_block(
                 moment = replacement
                 if moment.get("moment_id") in seen:
                     continue
-        block = _format_related_moment(moment, path_has_caution(hit.best_path))
+        block = _format_related_moment(
+            moment,
+            path_has_caution(hit.best_path),
+            path=hit.best_path,
+            moment_map=moment_map,
+        )
         block_tokens = count_tokens_approx(block)
         if block_tokens > remaining:
             break

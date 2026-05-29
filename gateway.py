@@ -3206,8 +3206,7 @@ class GatewayService:
 
         meta = bucket.get("metadata", {}) or {}
         title = str(meta.get("name") or bucket.get("id") or "memory").strip()
-        context = self._bucket_context_snippet(bucket, max_chars)
-        return self._clip_text(f"{title}: {context}" if context else title, max_chars)
+        return self._clip_text(title, max_chars)
 
     @staticmethod
     def _summary_from_jsonish_text(text: str) -> str:

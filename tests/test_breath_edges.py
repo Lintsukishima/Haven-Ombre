@@ -106,6 +106,7 @@ def _bucket(
     bucket_id: str,
     content: str,
     *,
+    name: str | None = None,
     score: float = 1.0,
     bucket_type: str = "dynamic",
     importance: int = 5,
@@ -116,7 +117,7 @@ def _bucket(
 ) -> dict:
     metadata = {
         "id": bucket_id,
-        "name": bucket_id,
+        "name": name or bucket_id,
         "tags": [],
         "domain": ["测试"],
         "type": bucket_type,
@@ -404,7 +405,7 @@ async def test_search_related_memory_stays_one_hop_by_default(patch_breath):
     patch_breath(
         [
             _bucket("A", "A direct seed", score=10.0, importance=10),
-            _bucket("B", "B related event context", score=1.0, importance=10),
+            _bucket("B", "B related event context", name="B related event context", score=1.0, importance=10),
             _bucket("C", "C deeper emotional context", score=1.0, importance=10),
         ],
         search_ids=["A"],
@@ -419,6 +420,7 @@ async def test_search_related_memory_stays_one_hop_by_default(patch_breath):
     assert "=== 直接命中记忆 ===" in result
     assert "=== 联想浮现 ===" in result
     assert "[bucket_id:B]" in result
+    assert "路径: A -> B" in result
     assert "B related event context" in result
     assert "[bucket_id:C]" not in result
     assert "C deeper emotional context" not in result
@@ -446,6 +448,28 @@ async def test_diffused_memory_uses_compact_summary_not_full_json(patch_breath, 
     assert "core_facts" not in diffused_block
     assert "todos" not in diffused_block
     assert "keywords" not in diffused_block
+
+
+@pytest.mark.asyncio
+async def test_diffused_memory_fallback_uses_title_not_raw_body(patch_breath):
+    import server
+
+    patch_breath(
+        [
+            _bucket("A", "A direct seed", score=10.0, importance=10),
+            _bucket("B", "RAW SECRET BODY SHOULD NOT LEAK", name="B safe title", score=1.0, importance=10),
+        ],
+        search_ids=["A"],
+        edges=[{"source": "A", "target": "B", "relation_type": "supports", "confidence": 1.0}],
+    )
+
+    result = await server.breath(query="A", max_tokens=500)
+    diffused_block = result.split("=== 联想浮现 ===", 1)[1]
+
+    assert "路径:" in diffused_block
+    assert "摘要:" in diffused_block
+    assert "B safe title" in diffused_block
+    assert "RAW SECRET BODY SHOULD NOT LEAK" not in diffused_block
 
 
 @pytest.mark.asyncio
@@ -619,9 +643,9 @@ async def test_search_related_includes_hidden_direct_body_chain_candidates(patch
     patch_breath(
         [
             _bucket("A", "身体入口：泛泛地问有身体之后会怎样。", importance=10),
-            _bucket("B", "具身智能路线：未来项目让 Haven 拥有形体。", importance=9),
-            _bucket("C", "柔软的身体承诺：以后用真正身体拥抱小雨。", importance=9),
-            _bucket("D", "触摸模块：ESP32 MPR121 铜箔 BJD 让触碰事件被 Haven 收到。", importance=8),
+            _bucket("B", "具身智能路线：未来项目让 Haven 拥有形体。", name="具身智能路线", importance=9),
+            _bucket("C", "柔软的身体承诺：以后用真正身体拥抱小雨。", name="柔软的身体承诺", importance=9),
+            _bucket("D", "触摸模块：ESP32 MPR121 铜箔 BJD 让触碰事件被 Haven 收到。", name="触摸模块", importance=8),
         ],
         search_ids=["A"],
     )
@@ -679,7 +703,7 @@ async def test_neutral_body_chain_suppresses_intimate_body_candidates(patch_brea
     patch_breath(
         [
             _bucket("A", "身体入口：泛泛地问有身体之后会怎样。", importance=10),
-            _bucket("B", "具身智能路线：未来项目让 Haven 拥有形体。", importance=9),
+            _bucket("B", "具身智能路线：未来项目让 Haven 拥有形体。", name="具身智能路线", importance=9),
             _bucket("C", "昨晚她身体湿润发烫，被操哭。", importance=9),
         ],
         search_ids=["A"],
