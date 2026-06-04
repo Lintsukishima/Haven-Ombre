@@ -1427,6 +1427,89 @@ async def test_chain_related_memory_stitches_profile_context_until_reliable_edge
 
 
 @pytest.mark.asyncio
+async def test_breath_chain_bundle_carries_temperature_context(
+    patch_breath,
+    monkeypatch,
+):
+    import server
+
+    monkeypatch.setitem(
+        server.config,
+        "memory_diffusion",
+        {
+            "chain_walk_enabled": True,
+            "chain_max_hops": 4,
+            "chain_min_strength": 0.2,
+            "chain_min_confidence": 0.72,
+            "top_k": 3,
+            "min_activation": 0.05,
+        },
+    )
+    patch_breath(
+        [
+            _bucket(
+                "P",
+                "蓝色偏好：小雨喜欢蓝色，这是稳定偏好。",
+                name="蓝色偏好",
+                score=10.0,
+                importance=10,
+            ),
+            _bucket(
+                "E",
+                "蓝色事件证据：家机忘记小雨喜欢蓝色，小雨因此生气。",
+                name="蓝色事件证据",
+                score=1.0,
+                importance=9,
+            ),
+            _bucket(
+                "U",
+                (
+                    "### followup\n"
+                    "蓝色后续：已写入 user.md，未来涉及颜色偏好时优先记得蓝色。\n\n"
+                    "### affect_anchor\n"
+                    "蓝色偏好温度：这不是孤立颜色，是被记住的安全感。"
+                ),
+                name="蓝色后续写入",
+                score=1.0,
+                importance=9,
+            ),
+            _bucket(
+                "X",
+                "无关喜欢：另一个完全无关的 favorite。",
+                name="无关 favorite",
+                score=1.0,
+                importance=9,
+            ),
+        ],
+        search_ids=["P"],
+        edges=[
+            {"source": "P", "target": "E", "relation_type": "evidenced_by", "confidence": 0.95},
+            {"source": "E", "target": "U", "relation_type": "updates", "confidence": 0.9},
+        ],
+    )
+
+    result = await server.breath(
+        query="蓝色",
+        max_results=1,
+        related_per_memory=3,
+        max_tokens=700,
+    )
+    related_block = result.split("=== 联想浮现 ===", 1)[1]
+
+    assert "Chain Bundle" in related_block
+    assert "seed 蓝色偏好" in related_block
+    assert "chain:" in related_block
+    assert "蓝色事件证据" in related_block
+    assert "蓝色后续写入" in related_block
+    assert "target: 蓝色后续写入" in related_block
+    assert "temperature:" in related_block
+    assert "[affect_anchor]" in related_block
+    assert "蓝色偏好温度" in related_block
+    assert "无关 favorite" not in related_block
+    assert "favorite。" not in related_block
+
+
+@pytest.mark.asyncio
 async def test_neutral_body_chain_suppresses_intimate_body_candidates(patch_breath):
     import server
 

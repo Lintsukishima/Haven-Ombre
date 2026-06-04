@@ -1698,11 +1698,12 @@ async def _build_mcp_diffused_memory_block(
         for edge in memory_edge_store.list_edges()
         if float(edge.get("confidence", 0.0)) >= min_confidence
     ]
+    diffusion_options = _breath_related_diffusion_options(len(source_ids) * limit_per_source)
     hits = diffuse_memory(
         seed_scores_for_buckets(source_buckets),
         edges,
         bucket_map,
-        options=_breath_related_diffusion_options(len(source_ids) * limit_per_source),
+        options=diffusion_options,
         exclude_ids=exclude_set,
         node_salience=node_salience,
         node_resonance=node_resonance,
@@ -1745,9 +1746,23 @@ async def _build_mcp_diffused_memory_block(
                 if path_has_caution(hit.best_path)
                 else "背景联想，不代表当前事实。"
             )
-            path_part = f"路径: {path_summary}；" if path_summary else ""
-            context_part = f"；语境: {context}" if context else ""
-            block = f"- [bucket_id:{target_id}] {path_part}摘要: {summary}{context_part}（{caution}）"
+            if (
+                diffusion_options.chain_walk_enabled
+                and len(getattr(hit.best_path, "steps", ()) or ()) >= 2
+            ):
+                block = _format_bucket_chain_bundle(
+                    target_id,
+                    target,
+                    summary,
+                    context,
+                    hit.best_path,
+                    bucket_map,
+                    caution,
+                )
+            else:
+                path_part = f"路径: {path_summary}；" if path_summary else ""
+                context_part = f"；语境: {context}" if context else ""
+                block = f"- [bucket_id:{target_id}] {path_part}摘要: {summary}{context_part}（{caution}）"
             block_tokens = count_tokens_approx(block)
             if block_tokens > remaining:
                 break
@@ -1761,6 +1776,27 @@ async def _build_mcp_diffused_memory_block(
             continue
 
     return "\n---\n".join(parts)
+
+
+def _format_bucket_chain_bundle(
+    target_id: str,
+    target: dict,
+    summary: str,
+    temperature_context: str,
+    path,
+    bucket_map: dict[str, dict],
+    note: str,
+) -> str:
+    nodes = tuple(str(node_id) for node_id in (getattr(path, "nodes", ()) or ()))
+    seed_id = nodes[0] if nodes else ""
+    seed_label = _inspect_bucket_label(bucket_map.get(seed_id), seed_id)
+    target_label = _inspect_bucket_label(target, target_id)
+    chain = _bucket_diffusion_path_summary(path, bucket_map)
+    temperature_part = f"；temperature: {temperature_context}" if temperature_context else ""
+    return (
+        f"- Chain Bundle: seed {seed_label}；chain: {chain}；"
+        f"target: {target_label}: {summary}{temperature_part}（{note}）"
+    )
 
 
 def _bucket_temperature_context(bucket: dict, max_items: int = 2, max_chars: int = 90) -> str:
@@ -2249,14 +2285,17 @@ def _format_related_moment(
     caution: bool = False,
     path=None,
     moment_map: dict[str, dict] | None = None,
+    chain_bundle: bool = False,
 ) -> str:
+    moment_map = moment_map or {}
     if caution:
         note = "路径含冲突/阻断，仅作边界背景。"
     elif path is not None and path_has_old_version(path):
         note = "旧路径/旧版本背景，不代表当前事实。"
     else:
         note = "背景联想，不代表当前事实。"
-    moment_map = moment_map or {}
+    if chain_bundle and path is not None and len(getattr(path, "steps", ()) or ()) >= 2:
+        return _format_related_chain_bundle(moment, note, path, moment_map)
     summary = _diffused_moment_summary(moment, path=path, moment_map=moment_map)
     context = _diffused_temperature_context(moment, path=path, moment_map=moment_map)
     path_part = ""
@@ -2268,6 +2307,25 @@ def _format_related_moment(
     return (
         f"- [bucket_id:{moment['bucket_id']}] [moment_id:{moment['moment_id']}] "
         f"{path_part}摘要: {summary}{context_part}（{note}）"
+    )
+
+
+def _format_related_chain_bundle(
+    moment: dict,
+    note: str,
+    path,
+    moment_map: dict[str, dict],
+) -> str:
+    nodes = tuple(str(node_id) for node_id in (getattr(path, "nodes", ()) or ()))
+    seed_id = nodes[0] if nodes else ""
+    seed_label = _moment_node_label(moment_map.get(seed_id), seed_id)
+    chain = _moment_path_summary(path, moment_map)
+    target = _diffused_moment_summary(moment, path=None, moment_map=moment_map)
+    temperature = _diffused_temperature_context(moment, path=path, moment_map=moment_map)
+    temperature_part = f"；temperature: {temperature}" if temperature else ""
+    return (
+        f"- Chain Bundle: seed {seed_label}；chain: {chain}；"
+        f"target: {target}{temperature_part}（{note}）"
     )
 
 
@@ -3136,11 +3194,12 @@ async def _build_mcp_moment_diffused_memory_block(
         explicit_lookup=allow_archive_targets,
     )
     exclude_bucket_ids = set(exclude_bucket_ids or set())
+    diffusion_options = _breath_related_diffusion_options(len(seed_moments) * limit_per_source)
     hits = diffuse_memory(
         _seed_scores_for_moments(seed_moments),
         edges,
         moment_map,
-        options=_breath_related_diffusion_options(len(seed_moments) * limit_per_source),
+        options=diffusion_options,
         exclude_ids={moment["moment_id"] for moment in seed_moments if moment.get("moment_id")},
         query_text=query_text,
     )
@@ -3169,6 +3228,7 @@ async def _build_mcp_moment_diffused_memory_block(
             path_has_caution(hit.best_path),
             path=hit.best_path,
             moment_map=moment_map,
+            chain_bundle=diffusion_options.chain_walk_enabled,
         )
         block_tokens = count_tokens_approx(block)
         if block_tokens > remaining:

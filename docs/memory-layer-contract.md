@@ -94,6 +94,7 @@ Related return:
 - Always summary.
 - Include path/relation when it helps the model understand why it appeared.
 - Never let related memory pretend to be the current fact.
+- When reliable chain walk is enabled and the path has at least two steps, Gateway and MCP breath may render a compact `Chain Bundle`: seed, chain path, target summary, and 1-2 temperature context items. This is still summary-only related memory, not raw bucket injection.
 
 Retrieval mode:
 
