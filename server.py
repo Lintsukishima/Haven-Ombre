@@ -2187,13 +2187,10 @@ def _format_readonly_related_memory(bucket: dict) -> str:
     if meta.get("digested"):
         labels.append("已消化")
     state = f" ({', '.join(labels)})" if labels else ""
-    preview = _bucket_text_for_embedding(bucket).replace("\n", " ").strip()
-    if len(preview) > 220:
-        preview = preview[:220].rstrip() + "..."
+    title = str(meta.get("name") or "").strip() or _bucket_context_snippet(bucket, max_chars=36) or bucket["id"]
     return (
-        "\n旧记忆(只读，不触碰): "
-        f"[{meta.get('name', bucket['id'])}] [bucket_id:{bucket['id']}]{state}\n"
-        f"{preview}"
+        "\n旧记忆提示(只读): "
+        f"可能相关「{title}」[bucket_id:{bucket['id']}]{state}"
     )
 
 
@@ -2562,7 +2559,6 @@ async def _backfill_memory_enrichment(
     return {"processed": len(processed), "ids": processed, "errors": errors}
 
 
-@mcp.tool()
 async def enrich_backfill(limit: int = 10) -> dict:
     """后台补跑缺失的 tags/confidence/memory_edges；主要用于 enrich_on_write 曾经超时或关闭后的修复。"""
     return await _backfill_memory_enrichment(limit=limit)
@@ -2684,7 +2680,6 @@ async def _backfill_memory_edges(
     }
 
 
-@mcp.tool()
 async def edge_backfill(
     limit: int = 10,
     bucket_id: str = "",
@@ -4696,7 +4691,6 @@ def _inspect_path_payload(path, bucket_map: dict[str, dict]) -> dict:
     }
 
 
-@mcp.tool()
 async def inspect_diffusion(
     query: str,
     max_seeds: int = 3,
@@ -4893,7 +4887,6 @@ def _inspect_moment_payload(
     return payload
 
 
-@mcp.tool()
 async def inspect_moments(bucket_id: str = "", limit: int = 20) -> dict:
     """只读诊断 bucket 如何被拆成 moment；写入/刷新 SQLite 索引，不 touch bucket。"""
     bucket_id = str(bucket_id or "").strip()
@@ -5013,14 +5006,7 @@ async def breath(
     mode: str = "",
     session_id: str = "",
 ) -> str:
-    """读取记忆,不写入。
-    调用方式: 新对话轻交接用 breath(is_session_start=True) 或 breath(mode="handoff"); 查过去用 breath(query="主题词"); 只读模型感受用 breath(domain="feel"); 只读悄悄话用 breath(domain="whisper")。
-    默认只从本次命中的普通记忆沿持久化 memory_edges 带一跳联想浮现; embedding 相似边只是检索/图谱参考,不是可手写的记忆关系。
-    如果夜梦与当前语境共振,breath 会追加 ===== 梦境 ===== 块;梦只浮现一次。
-    include_core/core_limit 控制 pinned/protected 核心准则数量; include_related=False 可关闭联想浮现块。
-    surface="auto" 用于 Gateway/Bridge 自动注入：空泛召回句不硬捞语义候选。
-    无 query/domain 的 is_session_start=True 会直接走 handoff，只返回画像/persona/最近连续性/少量锚点，不运行广泛动态召回。
-    """
+    """只读检索记忆。查主题用 query；新窗口轻交接用 mode="handoff"；domain="feel"/"whisper" 读取对应私密通道。"""
     await decay_engine.ensure_started()
     max_results = _int_between(max_results, 20, 1, 50)
     max_tokens = _int_between(max_tokens, 10000, 0, 20000)
@@ -5700,7 +5686,6 @@ async def _select_resurface_buckets(
 # Tool 1.4: resurface — dormant memory resurfacing
 # 工具 1.4：resurface — 久未触碰记忆浮现
 # =============================================================
-@mcp.tool()
 async def resurface(max_results: int = 1, include_archive: bool = True, max_tokens: int = 800) -> str:
     """只读浮现久未触碰的旧记忆。越久没碰过越靠前；默认包含归档桶；不 touch,不刷新 last_active,不增加 activation_count。"""
     try:
@@ -5750,10 +5735,7 @@ async def resurface(max_results: int = 1, include_archive: bool = True, max_toke
 # =============================================================
 @mcp.tool()
 async def read_bucket(bucket_id: str) -> dict:
-    """按 bucket_id 精确读取完整记忆桶,返回正文和元数据。
-    用于更新、合并、补喜欢原因、补 affect_anchor 或 trace 前确认目标。
-    不触碰 last_active,不增加 activation_count,也不影响自然浮现权重。
-    """
+    """按 bucket_id 精确读取完整记忆桶；trace/comment 前先读。只读，不刷新活跃度。"""
     bucket_id = (bucket_id or "").strip()
     if not bucket_id or not MEMORY_ID_RE.fullmatch(bucket_id):
         return {"error": "invalid bucket_id"}
@@ -5775,7 +5757,7 @@ async def comment_bucket(
     valence: float = -1,
     arousal: float = -1,
 ) -> dict:
-    """给已有 bucket 追加一条年轮并 touch+1。再次读到旧记忆时的感受/补充请优先用这个工具；不会改正文，也不会把源记忆标记为 digested。"""
+    """给已有 bucket 追加年轮/补充感受；会 touch，不改正文。"""
     bucket_id = (bucket_id or "").strip()
     if not bucket_id or not MEMORY_ID_RE.fullmatch(bucket_id):
         return {"error": "invalid bucket_id"}
@@ -5922,17 +5904,7 @@ async def hold(
     valence: float = -1,
     arousal: float = -1,
 ) -> str:
-    """写入一条长期记忆卡,不是聊天流水、运维记录或整篇日记。写前应先用 breath/read_bucket 查重。
-    普通事实: hold(content="YYYY-MM-DD, 当前用户...", tags="relationship_event 或 project_event", importance=5-7)。
-    承诺/待办: tags 传 "commitment,todo" 或 "commitment,wish"; content 写清谁答应了什么、何时/什么条件下要继续。
-    给旧记忆写年轮/再次阅读感受: 优先用 comment_bucket(bucket_id="...", content="...", kind="feel", valence=0.x, arousal=0.x)。
-    无源记忆的碎碎念/悄悄话: 用 hold(content="...", whisper=True, valence=0.x, arousal=0.x),会存为独立 feel 并打 whisper 标签。
-    新记忆本身值得偏爱: tags 可传 "haven_favorite,flavor_偏爱"; content 必须包含很短的 "### reflection" 段落。
-    正文结构: 事件/经历写 ### moment；Haven 的理解、确认、偏爱原因写 ### reflection；### affect_anchor 只放和弦、速度、力度等温度线。
-    普通写入会新建 bucket,写 embedding,后台触发 ReflectionEngine 补 tags/confidence/memory_edges,并返回一条只读相关旧记忆。
-    pinned=True 只给极少数核心准则,技术进度和运维细节不要钉选。
-    feel=True 且带 source_bucket 是旧兼容入口,新调用不要使用；feel=True 但没有 source_bucket 会转为 whisper。
-    """
+    """写一条长期记忆。单个事实/承诺/偏好用 hold；旧记忆的新感受用 comment_bucket；悄悄话用 whisper=True。"""
     await decay_engine.ensure_started()
 
     # --- Input validation / 输入校验 ---
@@ -6083,11 +6055,7 @@ async def darkroom_enter(
     tags: str = "",
     source: str = "mcp",
 ) -> dict:
-    """进入暗房并写下一段未显影反思。读就是写: 服务端会接上上一条暗房状态,但工具结果不回显正文。
-    用于还没想透、不该立刻进入普通记忆/前端 trace/handoff 的内在反思。
-    返回只包含门口事件、时间、条数、completeness 变化和标签; 不包含 note 原文。
-    如果要把内容带到小雨面前,明确调用 darkroom_release。
-    """
+    """写入一段未显影的私密反思；返回门口状态，不回显 note 正文。"""
     try:
         return darkroom_store.enter(
             note,
@@ -6101,13 +6069,11 @@ async def darkroom_enter(
         return {"status": "error", "error": str(exc)}
 
 
-@mcp.tool()
 async def darkroom_status() -> dict:
     """查看暗房门口状态。不返回任何暗房正文。"""
     return darkroom_store.status()
 
 
-@mcp.tool()
 async def darkroom_release(entry_id: str = "latest", reason: str = "") -> dict:
     """把一条暗房内容显影并带出来。这个工具会公开返回正文,只在明确想让内容可见时调用。"""
     try:
@@ -6153,13 +6119,7 @@ def _looks_like_operit_auto_grow_content(content: str) -> bool:
 
 @mcp.tool()
 async def grow(content: str, auto: bool = False, source: str = "", context: Context | None = None) -> str:
-    """长内容摘记: 只给已经筛过、包含多个长期记忆点的片段; 不要把整篇日终日记、一天流水或完整情绪过程丢进来。
-    content 应该是少量可长期召回的事实/偏好/承诺/项目状态; 服务端会拆成少量 bucket、写 embedding,并后台触发 enrich。
-    输出正文使用: ### moment 记录发生的事; ### reflection 记录 Haven 的理解/确认/偏爱原因; ### affect_anchor 只放和弦/速度/力度等温度线。
-    如果只有单条明确事实,优先用 hold。若要给旧记忆追加年轮/喜欢原因,优先用 comment_bucket；若要改正文,先 read_bucket 再 trace(content=完整新正文)。
-    Operit/worker 等自动总结入口传 source="operit" 或 auto=True，会先过轻量 surprise 门卫：低分只记日志，中分 pending，足够高或重复出现才真正写入。
-    短内容(<30字)会走 hold-like 快速路径。
-    """
+    """把筛过的长片段拆成少量长期记忆；单条事实优先 hold，旧记忆补感受优先 comment_bucket。"""
     await decay_engine.ensure_started()
 
     if not content or not content.strip():
@@ -6434,13 +6394,7 @@ async def trace(
     content: str = "",
     delete: bool = False,
 ) -> str:
-    """修改已有记忆,不创建新桶。
-    resolved=1 或 digested=1 让旧事/已完成事项沉底; pinned=1 只给核心准则; anchor=1 只给经过时间验证且未来长期需要的锚点(受数量和年龄限制)。
-    tags/domain/content 是替换不是追加: 改 tags 或正文前先 read_bucket,保留旧值后再传完整新值。
-    给旧记忆补 reflection 或 affect_anchor: 先 read_bucket,再 trace(content="旧正文 + 新段落")。
-    标记偏爱: 先 read_bucket 取现有 tags,再 trace(tags="原tag,haven_favorite,flavor_...")。
-    delete=True 删除。只传需要改的字段,-1或空=不改。
-    """
+    """修改已有记忆，不创建新桶。tags/domain/content 是替换；改前先 read_bucket。resolved/digested 让旧事沉底。"""
 
     if not bucket_id or not bucket_id.strip():
         return "请提供有效的 bucket_id。"
@@ -6531,7 +6485,7 @@ async def trace(
 # =============================================================
 @mcp.tool()
 async def pulse(include_archive: bool = False) -> str:
-    """只读查看系统状态和记忆桶摘要。用于人工盘点、查重复、找需要 read_bucket/trace 的候选; include_archive=True 才显示归档桶。不要把 pulse 输出当作新记忆内容再写回。"""
+    """只读查看系统状态和记忆桶摘要；用于盘点和找 read_bucket/trace 候选。"""
     try:
         stats = await bucket_mgr.get_stats()
     except Exception as e:
@@ -6616,12 +6570,7 @@ async def introspection(
     created_from: str = "",
     created_to: str = "",
 ) -> str:
-    """读取最近普通记忆供 AI 清醒自省,不是梦境生成,也不是日记整理。
-    读后只在真的可以放下时 trace(resolved=1/digested=1),或在产生新的第一人称沉淀/喜欢原因时 comment_bucket(bucket_id, content)。
-    limit/offset 可翻看更早的普通记忆; introspection(offset=10) 读取下一页。
-    created_date="YYYY-MM-DD" 可读取某一天; created_from/created_to 可读取日期范围。
-    不要把 introspection 返回内容直接再写成普通 bucket。
-    """
+    """读取最近普通记忆供自省；可按日期翻页。放下用 trace，产生新感受用 comment_bucket。"""
     await decay_engine.ensure_started()
     limit = _int_between(limit, 10, 1, 30)
     offset = _int_between(offset, 0, 0, 10000)
@@ -6899,7 +6848,6 @@ def _literal_arg(value: str) -> str:
     return _json_lib.dumps(str(value or ""), ensure_ascii=False)
 
 
-@mcp.tool()
 async def dream() -> str:
     """兼容旧客户端。旧 dream() 已改名为 introspection(); 夜梦由后台小模型自动生成。"""
     result = await introspection()
@@ -6910,7 +6858,6 @@ async def dream() -> str:
 # Tool 6: reflect — daily relationship weather
 # 工具 6：reflect — 生成日印象
 # =============================================================
-@mcp.tool()
 async def reflect(period: str = "daily", force: bool = False) -> dict:
     """生成 daily relationship_weather 类型的 feel,记录当天关系天气,正文会带 affect_anchor 和弦。weekly 默认关闭,需 reflection.weekly_enabled=true 才会生成; force=True 会重写同周期结果。它不会替代 hold/grow 写具体 bucket。"""
     await decay_engine.ensure_started()
@@ -6923,7 +6870,6 @@ async def reflect(period: str = "daily", force: bool = False) -> dict:
     )
 
 
-@mcp.tool()
 async def portrait_maintain(force: bool = False) -> dict:
     """维护每日 portrait state。只写 state/portrait_state.json，不写 profile_fact、anchor、pinned、protected 或 Core Memory。"""
     await decay_engine.ensure_started()
@@ -6951,7 +6897,6 @@ def _portrait_state_payload() -> dict:
     }
 
 
-@mcp.tool()
 async def portrait_state() -> dict:
     """读取当前 portrait state，供检查 handoff 画像来源。"""
     return _portrait_state_payload()

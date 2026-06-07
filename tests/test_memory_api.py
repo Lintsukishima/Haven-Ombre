@@ -2551,8 +2551,9 @@ async def test_hold_returns_readonly_related_memory_without_merging(monkeypatch,
     all_buckets = await bucket_mgr.list_all(include_archive=True)
 
     assert "新建→" in result
-    assert "旧记忆(只读，不触碰)" in result
+    assert "旧记忆提示(只读)" in result
     assert f"[bucket_id:{old_id}]" in result
+    assert "小雨和 Haven 在旧窗口讨论过年轮" not in result
     assert len([b for b in all_buckets if b["metadata"].get("type") == "dynamic"]) == 2
 
 
