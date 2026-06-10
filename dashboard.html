@@ -2405,7 +2405,7 @@
         <p>新窗口 handoff 当前使用的每日画像状态；只读，不写 profile_fact、anchor 或 Core Memory。</p>
       </div>
       <div class="profile-actions">
-        <button type="button" onclick="loadPortraitState()">刷新</button>
+        <button type="button" onclick="refreshPortraitView()">刷新</button>
         <button type="button" onclick="runPortraitMaintain()">手动生成</button>
         <button type="button" class="danger" onclick="resetPortraitState()">清空画像</button>
       </div>
@@ -2967,7 +2967,8 @@ document.getElementById('search-input').addEventListener('input', (e) => {
   }, 300);
 });
 
-async function loadBuckets() {
+async function loadBuckets(options) {
+  options = options || {};
   try {
     const res = await authFetch(BASE + '/api/buckets');
     if (!res) return;
@@ -2983,7 +2984,7 @@ async function loadBuckets() {
     renderBuckets(filterBuckets(allBuckets));
     if (getActiveTab() === 'reflection') renderReflectionReview();
     if (getActiveTab() === 'dreams') loadDreams();
-    if (getActiveTab() === 'profile') {
+    if (getActiveTab() === 'profile' && !options.skipProfileRefresh) {
       loadPortraitState();
       loadProfileFacts();
     }
@@ -3076,6 +3077,31 @@ function isDailyImpressionBucket(bucket) {
   return bucket.type === 'feel'
     && tags.includes('relationship_weather')
     && tags.includes('daily_impression');
+}
+
+function bucketTags(bucket) {
+  return (bucket && bucket.tags || []).map(function(tag) {
+    return String(tag || '').trim();
+  }).filter(Boolean);
+}
+
+function isSelfAnchorBucket(bucket) {
+  if (!bucket) return false;
+  if (bucket.self_anchor) return true;
+  var tags = bucketTags(bucket);
+  return tags.includes('自我') || tags.includes('self_anchor') || tags.includes('first_person_anchor');
+}
+
+function isProfileBucket(bucket) {
+  if (!bucket || isSelfAnchorBucket(bucket)) return false;
+  if (bucket.profile_kind) return true;
+  var tags = bucketTags(bucket);
+  return tags.includes('profile_fact')
+    || tags.includes('profile')
+    || tags.includes('preference')
+    || tags.includes('project_milestone')
+    || tags.includes('relationship_anchor')
+    || tags.some(function(tag) { return tag.indexOf('profile_') === 0; });
 }
 
 function getDailyImpressions() {
@@ -3309,6 +3335,12 @@ async function runPortraitMaintain() {
   }
 }
 
+async function refreshPortraitView() {
+  await loadBuckets({ skipProfileRefresh: true });
+  await loadPortraitState();
+  await loadProfileFacts();
+}
+
 async function resetPortraitState() {
   var typed = prompt('输入 RESET 清空 Portrait State。下一次手动生成会按第一次生成运行。');
   if (typed !== 'RESET') return;
@@ -3346,6 +3378,7 @@ function renderPortraitState(data) {
     '<span class="profile-chip">state ' + esc(state.state_path || '—') + '</span>' +
   '</div>';
   content.innerHTML =
+    renderPortraitSelfAnchor() +
     renderPortraitTimeline(state.recent_timeline, state.recent_activities) +
     '<div class="portrait-state-grid">' +
       renderPortraitScope('user', portrait.user || {}) +
@@ -3355,6 +3388,39 @@ function renderPortraitState(data) {
       renderPortraitCandidates('Stable Candidates', state.stable_candidates) +
       renderPortraitCandidates('Profile Fact Candidates', state.profile_fact_candidates) +
     '</div>';
+}
+
+function bucketTimeValue(bucket) {
+  var raw = bucket && (bucket.updated_at || bucket.last_active || bucket.created || bucket.date) || '';
+  var time = Date.parse(raw);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function renderPortraitSelfAnchor() {
+  var rows = allBuckets
+    .filter(isSelfAnchorBucket)
+    .sort(function(a, b) {
+      var importanceDelta = Number(b.importance || 0) - Number(a.importance || 0);
+      if (importanceDelta) return importanceDelta;
+      var timeDelta = bucketTimeValue(b) - bucketTimeValue(a);
+      if (timeDelta) return timeDelta;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    })
+    .slice(0, 1)
+    .map(function(bucket) {
+      return {
+        text: bucket.content_preview || bucket.name || bucket.id || '',
+        scope: '自我',
+        confidence: bucket.confidence,
+        source_date: getBucketDate(bucket),
+        updated_at: bucket.updated_at || bucket.last_active || bucket.created || '',
+        evidence: [{ bucket_id: bucket.id }]
+      };
+    });
+  return '<section class="portrait-scope portrait-self-anchor">' +
+    '<div class="portrait-layer-title">自我 Anchor</div>' +
+    renderPortraitRows(rows, '还没有自我 anchor。') +
+  '</section>';
 }
 
 function renderPortraitTimeline(timeline, recentActivities) {
@@ -4078,20 +4144,27 @@ function buildFilters() {
     { key: 'digested', label: '🌿 已消化' },
     { key: 'archived', label: '📦 归档' },
   ];
+  if (allBuckets.some(isSelfAnchorBucket)) types.push({ key: 'tag:self_anchor', label: '自我' });
+  if (allBuckets.some(isProfileBucket)) types.push({ key: 'profile', label: '画像' });
+  const domainFilters = Array.from(domains).slice(0, 10).map(function(d) {
+    return { key: 'domain:' + d, label: d };
+  });
+  const availableFilters = types.concat(domainFilters).map(function(t) { return t.key; });
+  if (availableFilters.indexOf(currentFilter) === -1) currentFilter = 'all';
   filters.innerHTML = types.map(function(t) {
-    return '<button class="filter-btn ' + (t.key === 'all' ? 'active' : '') + '" data-filter="' + escAttr(t.key) + '">' + esc(t.label) + '</button>';
-  }).join('') + Array.from(domains).slice(0, 10).map(function(d) {
-    return '<button class="filter-btn" data-filter="' + escAttr('domain:' + d) + '">' + esc(d) + '</button>';
+    return '<button class="filter-btn ' + (t.key === currentFilter ? 'active' : '') + '" data-filter="' + escAttr(t.key) + '">' + esc(t.label) + '</button>';
+  }).join('') + domainFilters.map(function(d) {
+    return '<button class="filter-btn ' + (d.key === currentFilter ? 'active' : '') + '" data-filter="' + escAttr(d.key) + '">' + esc(d.label) + '</button>';
   }).join('');
 
-  filters.addEventListener('click', function(e) {
+  filters.onclick = function(e) {
     var btn = e.target.closest('.filter-btn');
     if (!btn) return;
     filters.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
     currentFilter = btn.dataset.filter;
     renderBuckets(filterBuckets(allBuckets));
-  });
+  };
 }
 
 function filterBuckets(buckets) {
@@ -4102,6 +4175,12 @@ function filterBuckets(buckets) {
   if (currentFilter === 'unresolved') return buckets.filter(function(b) { return !b.resolved && b.type !== 'permanent' && !b.pinned; });
   if (currentFilter === 'digested') return buckets.filter(function(b) { return b.digested; });
   if (currentFilter === 'archived') return buckets.filter(function(b) { return b.type === 'archived' || b.score < 0.3; });
+  if (currentFilter === 'profile') return buckets.filter(isProfileBucket);
+  if (currentFilter === 'tag:self_anchor') return buckets.filter(isSelfAnchorBucket);
+  if (currentFilter.startsWith('tag:')) {
+    var tag = currentFilter.slice(4);
+    return buckets.filter(function(b) { return bucketTags(b).includes(tag); });
+  }
   if (currentFilter.startsWith('domain:')) {
     var d = currentFilter.slice(7);
     return buckets.filter(function(b) { return (b.domain || []).includes(d); });

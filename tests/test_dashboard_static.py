@@ -167,7 +167,7 @@ def test_dashboard_exposes_profile_fact_page():
 def test_dashboard_exposes_portrait_state_panel():
     html = Path("dashboard.html").read_text(encoding="utf-8")
     profile_tab_block = html.split("if (target === 'profile')", 1)[1].split("if (target === 'word-map')", 1)[0]
-    load_buckets_block = html.split("async function loadBuckets()", 1)[1].split("function getActiveTab()", 1)[0]
+    load_buckets_block = html.split("async function loadBuckets", 1)[1].split("function getActiveTab()", 1)[0]
 
     assert 'id="portrait-state-panel"' in html
     assert 'id="portrait-state-summary"' in html
@@ -176,9 +176,13 @@ def test_dashboard_exposes_portrait_state_panel():
     assert "Portrait State" in html
     assert "只读，不写 profile_fact、anchor 或 Core Memory" in html
     assert "loadPortraitState()" in html
+    assert "refreshPortraitView()" in html
     assert "runPortraitMaintain" in html
     assert "resetPortraitState" in html
     assert "Recent Timeline" in html
+    assert "renderPortraitSelfAnchor" in html
+    assert "自我 Anchor" in html
+    assert "loadBuckets({ skipProfileRefresh: true });" in html
     assert "var deleteSpec = item._delete ? escAttr(jsString(JSON.stringify(item._delete))) : '';" in html
     assert "renderPortraitState" in html
     assert "renderPortraitScope" in html
@@ -201,6 +205,23 @@ def test_dashboard_exposes_portrait_state_panel():
     assert "loadPortraitState();" in profile_tab_block
     assert "loadProfileFacts();" in profile_tab_block
     assert "loadPortraitState();" in load_buckets_block
+
+
+def test_dashboard_groups_self_anchor_and_profile_filters():
+    html = Path("dashboard.html").read_text(encoding="utf-8")
+    build_block = html.split("function buildFilters()", 1)[1].split("function filterBuckets", 1)[0]
+    filter_block = html.split("function filterBuckets", 1)[1].split("function bucketBulkDeleteBlockReason", 1)[0]
+
+    assert "function isSelfAnchorBucket" in html
+    assert "function isProfileBucket" in html
+    assert "tag:self_anchor" in build_block
+    assert "label: '自我'" in build_block
+    assert "key: 'profile'" in build_block
+    assert "label: '画像'" in build_block
+    assert "filters.onclick = function(e)" in build_block
+    assert "filters.addEventListener" not in build_block
+    assert "currentFilter === 'profile'" in filter_block
+    assert "currentFilter === 'tag:self_anchor'" in filter_block
 
 
 def test_dashboard_hides_confirm_button_for_active_profile_facts():
