@@ -912,8 +912,11 @@ def _safe_float(value: Any) -> float:
 
 def _query_terms(query: str) -> list[str]:
     raw = str(query or "").strip()
-    terms = [part for part in re.split(r"[\s,，。！？!?;；:：/\\|]+", raw) if part]
-    terms.extend(re.findall(r"[A-Za-z0-9_\-]+|[\u4e00-\u9fff]{2,}", raw))
+    raw_terms = [part for part in re.split(r"[\s,，。！？!?;；:：/\\|]+", raw) if part]
+    raw_terms.extend(re.findall(r"[A-Za-z0-9_\-]+|[\u4e00-\u9fff]{2,}", raw))
+    terms = []
+    for part in raw_terms:
+        terms.extend(_query_term_variants(part))
     kept = []
     seen = set()
     for term in terms:
@@ -927,6 +930,24 @@ def _query_terms(query: str) -> list[str]:
         seen.add(normalized)
         kept.append(term)
     return kept
+
+
+def _query_term_variants(value: str) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    variants = [text]
+    stripped = re.sub(
+        r"(?:期望|希望|想要|需要|应该|不应该)?(?:召回|命中|查到|查一下|找一下|搜到|回忆|记忆)(?:的)?(?:是|到)?",
+        " ",
+        text,
+    )
+    stripped = re.sub(r"^(?:的是|是|到)", "", stripped).strip()
+    for part in re.split(r"(?:以及|还有|或者|和|与|及|跟|同|、|\+)+", stripped):
+        part = part.strip()
+        if part:
+            variants.append(part)
+    return variants
 
 
 def _list_text(value: Any) -> list[str]:

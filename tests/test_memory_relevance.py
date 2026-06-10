@@ -141,6 +141,16 @@ def test_associative_prompt_uses_quoted_focus_as_query_terms():
     assert content_terms_for_query("你会想到什么") == []
 
 
+def test_compound_recall_terms_keep_individual_anchors():
+    terms = content_terms_for_query("小机数据库和忠犬")
+    wrapped_terms = content_terms_for_query("唉......期望召回的是小机数据库和忠犬......")
+
+    assert "小机数据库" in terms
+    assert "忠犬" in terms
+    assert "小机数据库" in wrapped_terms
+    assert "忠犬" in wrapped_terms
+
+
 def test_explicit_entity_marker_handles_titlecase_entities_without_sentence_starters():
     assert query_has_explicit_entity_marker("Titans")
     assert query_has_explicit_entity_marker("Tell me about Titans")
