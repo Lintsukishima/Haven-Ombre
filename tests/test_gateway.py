@@ -3595,6 +3595,12 @@ def test_gateway_source_record_title_match_with_content_fragment_can_diffuse(
         name="Haven终于能用记忆工具",
         hours_ago=24,
     )
+    broad_child_id = _create_bucket(
+        bucket_mgr,
+        content="### moment\n小雨给其他小机接上工具，这条只有小机和工具背景。",
+        name="其他小机工具背景",
+        hours_ago=24,
+    )
     cfg = _gateway_config(
         test_config,
         recent_context_budget=0,
@@ -3637,6 +3643,16 @@ def test_gateway_source_record_title_match_with_content_fragment_can_diffuse(
     assert noise_id not in debug_payload["diffused_bucket_ids"]
     assert generic_id not in debug_payload["diffused_bucket_ids"]
     assert generic_id not in debug_payload["diffused_candidate_bucket_ids"]
+    assert broad_child_id not in debug_payload["diffused_bucket_ids"]
+    broad_debug = next(
+        (
+            row for row in debug_payload["diffused_moment_debug"]
+            if row.get("bucket_id") == broad_child_id
+        ),
+        None,
+    )
+    if broad_debug is not None:
+        assert broad_debug["suppression_reason"] == "low_confidence"
     assert any(
         "source_record_fragment_topic_evidence" in str(row.get("path", {}))
         for row in debug_payload["diffused_moment_debug"]

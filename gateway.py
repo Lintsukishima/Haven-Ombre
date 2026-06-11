@@ -5202,6 +5202,10 @@ class GatewayService:
             terms.append(cleaned)
             return len(terms) >= 8
 
+        for term in self._source_record_query_fragment_phrase_terms(query, fragment):
+            if add_term(term):
+                return terms
+
         for term in query_terms:
             if add_term(term):
                 return terms
@@ -5212,6 +5216,23 @@ class GatewayService:
                 if add_term(cleaned):
                     return terms
         return terms
+
+    def _source_record_query_fragment_phrase_terms(self, query: str, fragment: str) -> list[str]:
+        query_key = self._compact_lookup_key(query)
+        fragment_key = self._compact_lookup_key(fragment)
+        if len(query_key) < 3 or len(fragment_key) < 3:
+            return []
+        matches: list[str] = []
+        for size in range(min(len(query_key), 18), 2, -1):
+            for start in range(0, len(query_key) - size + 1):
+                candidate = query_key[start : start + size]
+                if candidate in fragment_key and candidate not in matches:
+                    matches.append(candidate)
+                    if len(matches) >= 3:
+                        return matches
+            if matches:
+                return matches
+        return matches
 
     def _source_record_topic_windows(
         self,
@@ -6527,33 +6548,99 @@ class GatewayService:
             if not seed_id or not terms:
                 continue
             seed_bucket_id = str(seed.get("bucket_id") or "")
-            ranked: list[tuple[tuple[int, float], list[str], dict]] = []
+            term_document_counts = self._source_record_fragment_term_document_counts(
+                candidates,
+                terms,
+                seed_bucket_id=seed_bucket_id,
+            )
+            query_keys = {
+                self._compact_lookup_key(term)
+                for term in self.recall_policy.specific_query_terms(query_text)
+                if self._compact_lookup_key(term)
+            }
+            ranked: list[tuple[tuple[int, float], list[str], bool, dict]] = []
             for moment in candidates:
                 if str(moment.get("bucket_id") or "") == seed_bucket_id:
                     continue
                 matched_terms = self._matched_source_record_topic_terms(moment, terms)
                 if not matched_terms:
                     continue
+                strong_match = self._source_record_fragment_match_is_strong(
+                    matched_terms,
+                    term_document_counts,
+                    query_keys,
+                )
                 rank_query = " ".join([query_text, *matched_terms]).strip()
-                ranked.append((self._recall_rank(rank_query, moment), matched_terms, moment))
+                ranked.append((self._recall_rank(rank_query, moment), matched_terms, strong_match, moment))
             ranked.sort(key=lambda item: item[0])
             limit = max(4, min(12, self.diffusion_options.top_k * 3))
-            for _rank, matched_terms, moment in ranked[:limit]:
+            for _rank, matched_terms, strong_match, moment in ranked[:limit]:
                 target_id = str(moment.get("moment_id") or "")
                 if not target_id:
                     continue
+                relation_type = "same_topic" if strong_match else "relates_to"
+                confidence = 0.92 if strong_match else 0.54
+                reason_prefix = (
+                    "source_record_fragment_topic_evidence"
+                    if strong_match
+                    else "source_record_fragment_weak_evidence"
+                )
                 edges.append(
                     {
                         "source": seed_id,
                         "target": target_id,
                         "bucket_id": seed_bucket_id,
-                        "relation_type": "same_topic",
-                        "confidence": 0.92,
-                        "reason": "source_record_fragment_topic_evidence:"
-                        + ",".join(matched_terms[:3]),
+                        "relation_type": relation_type,
+                        "confidence": confidence,
+                        "reason": f"{reason_prefix}:" + ",".join(matched_terms[:3]),
                     }
                 )
         return edges
+
+    def _source_record_fragment_term_document_counts(
+        self,
+        candidates: list[dict],
+        terms: list[str],
+        *,
+        seed_bucket_id: str,
+    ) -> dict[str, int]:
+        counts: dict[str, set[str]] = {}
+        for moment in candidates or []:
+            bucket_id = str(moment.get("bucket_id") or "")
+            if not bucket_id or bucket_id == seed_bucket_id:
+                continue
+            for term in self._matched_source_record_topic_terms(moment, terms):
+                key = self._compact_lookup_key(term)
+                if key:
+                    counts.setdefault(key, set()).add(bucket_id)
+        return {key: len(bucket_ids) for key, bucket_ids in counts.items()}
+
+    def _source_record_fragment_match_is_strong(
+        self,
+        matched_terms: list[str],
+        term_document_counts: dict[str, int],
+        query_keys: set[str],
+    ) -> bool:
+        keys = []
+        for term in matched_terms or []:
+            key = self._compact_lookup_key(term)
+            if key and key not in keys:
+                keys.append(key)
+        if not keys:
+            return False
+        if len(keys) >= 2:
+            return True
+        key = keys[0]
+        if len(key) >= 4 or re.search(r"\d", key) or re.fullmatch(r"[a-z0-9_.:-]{3,}", key):
+            return True
+        if key in query_keys and any(
+            other != key and len(other) > len(key) and key in other
+            for other in query_keys
+        ):
+            return False
+        if key in query_keys and len(key) >= 3:
+            return False
+        return term_document_counts.get(key, 0) <= 3
 
     @staticmethod
     def _source_record_path_topic_terms(path: Any, terms_by_id: dict[str, list[str]]) -> list[str]:
@@ -8316,7 +8403,6 @@ class GatewayService:
 
             add_section("Just Now Chat Context", just_now_context)
             add_section("Date Recall", date_recall)
-            add_section("Recent Context", recent_context)
             add_section("Context Mode", f"context_mode: {context_mode}" if context_mode.strip() else "")
             add_section("Memory Detail Request", memory_detail_recall_instruction)
             if "[created:" in str(recalled_memory or "") or "[created:" in str(targeted_memory_detail or ""):
@@ -8325,9 +8411,10 @@ class GatewayService:
                     "[created:YYYY-MM-DD] is the bucket record date, not necessarily the event date; prefer event dates in the memory text.",
                 )
             add_section("Recalled Memory", recalled_memory)
-            add_section("Date Persona Trace", date_persona_trace)
             add_section("Targeted Memory Detail", targeted_memory_detail)
             add_section("Diffused Memory", related_memory)
+            add_section("Recent Context", recent_context)
+            add_section("Date Persona Trace", date_persona_trace)
             add_section("New Window Handoff Hint", handoff_tool_hint)
             if persona_block.strip():
                 dynamic_sections.extend(["", persona_block])
