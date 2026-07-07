@@ -16,11 +16,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy project files / 复制项目文件
+# COPY config.example.yaml ./config.yaml
 COPY *.py .
 COPY resources ./resources
 COPY scripts ./scripts
 COPY dashboard.html .
-COPY config.example.yaml ./config.yaml
+COPY config.yaml /app/config.yaml
 RUN chmod +x scripts/*.sh
 
 # Persistent mount point: bucket data
