@@ -38,6 +38,7 @@ identity:
     - "柚月"
     - "小猫咪"
     - "小咪"
+    - "小命"
 
 
 # --- Merge threshold / 桶合并阈值 ---
@@ -280,7 +281,7 @@ gateway:
   host: "0.0.0.0"
   port: 8000
   default_session_id: "main"      # used only by compatible routes when the header is omitted
-  upstream_base_url: "https://api.openai.com/v1"
+  upstream_base_url: "https://aihubmix.com/v1"
   upstream_default_model: "gpt-4o-2024-11-20"
   upstream_models:
     - "gpt-4o-2024-11-20"
