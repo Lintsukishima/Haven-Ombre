@@ -499,7 +499,7 @@ persona:
   enabled: true
   profile_id: "main_profile"
   mode: "llm"
-  base_url: "https://api.openai.com/v1"
+  base_url: "https://aihubmix.com/v1"
   model: "gpt-4o-2024-11-20"
   # Optional thinking mode override for DeepSeek v4 models:
   #   disabled = non-thinking / enabled = thinking / empty = provider default
