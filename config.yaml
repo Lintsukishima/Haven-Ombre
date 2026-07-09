@@ -340,21 +340,21 @@ gateway:
   head_recent_hours: 72
   recent_context_reentry_idle_hours: 24
   recent_context_cooldown_hours: 6
-  dynamic_top_k: 10
-  inject_max_cards: 2
+  dynamic_top_k: 6
+  inject_max_cards: 1
   skip_recent_rounds: 5
   cooldown_hours: 6
   cooldown_floor: 0.3
   semantic_session_dedupe_enabled: true
   semantic_session_dedupe_threshold: 0.90
   semantic_session_dedupe_lexical_threshold: 0.82
-  inject_total_budget: 1200
+  inject_total_budget: 800
   core_memory_budget: 0
-  recent_context_budget: 300
-  just_now_context_enabled: true     # 刚刚/刚才/上一句: use short-term conversation_turns, not long-term memory
+  recent_context_budget: 120
+  just_now_context_enabled: false     # 刚刚/刚才/上一句: use short-term conversation_turns, not long-term memory
   just_now_context_hours: 6
-  just_now_context_max_turns: 5
-  just_now_context_budget: 420
+  just_now_context_max_turns: 3
+  just_now_context_budget: 0
   conversation_turns_max_entries: 500
   memory_sentinel_enabled: true     # grey-zone routing: search | tone_only | skip; hard recall signals bypass it
   memory_sentinel_llm_enabled: false # false = keep rule sentinel/searchable residue, skip the LLM grey-zone call
@@ -364,7 +364,7 @@ gateway:
   date_persona_trace_budget: 220
   date_persona_trace_max_events: 5
   date_persona_trace_include_daily: true
-  recalled_memory_budget: 400
+  recalled_memory_budget: 300
   direct_render_mode: auto   # auto | compact | full; direct/recalled display shape
   retrieval_mode: graph       # graph | bucket; bucket skips moment graph diffusion
   portrait_memory_enabled: true  # read-only stable portrait cache from profile_fact by default
@@ -373,7 +373,7 @@ gateway:
   portrait_memory_include_anchors: false # true optionally adds ordinary anchors; never includes pinned/protected/self_anchor
   query_planner_enabled: true  # extra LLM call: split long/low-confidence messages into short recall queries
   query_planner_model: ""      # empty = use dehydration.model via dehydration API
-  query_planner_min_chars: 16  # also catches short emotional reason lookups like "今天为什么激动哭"
+  query_planner_min_chars: 32  # also catches short emotional reason lookups like "今天为什么激动哭"
   query_planner_max_queries: 3
   query_planner_max_tokens: 360
   query_planner_supplemental_semantic: false # planner short queries use keyword/exact by default; avoids repeated embedding calls
@@ -384,7 +384,7 @@ gateway:
   relationship_weather_include_weekly: false
   favorite_memory_budget: 180
   favorite_memory_max_cards: 1
-  related_memory_budget: 220
+  related_memory_budget: 140
   core_memory_interval_rounds: 0
   current_inner_state_interval_rounds: 0
   relationship_weather_interval_rounds: 0
