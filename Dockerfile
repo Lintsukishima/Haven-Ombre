@@ -36,4 +36,4 @@ ENV OMBRE_BUCKETS_DIR=/app/buckets
 
 EXPOSE 8000
 
-CMD ["python", "gateway.py"]
+CMD ["python", "server.py"]
